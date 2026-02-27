@@ -1,0 +1,433 @@
+import os
+from datetime import datetime
+from re import T
+
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QTextEdit,
+    QLineEdit,
+    QFileDialog,
+)
+from PySide6.QtCore import QProcess
+from PySide6.QtCore import QTimer
+from PySide6.QtGui import QTextCursor
+
+class UpdateTab(QWidget):
+    def __init__(self):
+        super().__init__()
+
+        self.process = None
+        self.init_ui()
+
+    # ================= UI =================
+    def init_ui(self):
+        main_layout = QVBoxLayout()
+
+        # ===== Select Folder Area =====
+        folder_layout = QHBoxLayout()
+
+        self.update_folder_path_edit = QLineEdit()
+        self.update_folder_path_edit.setMinimumHeight(30)
+        self.update_folder_path_edit.setReadOnly(True)
+
+        self.btn_select_folder = QPushButton("Select Update Folder")
+        self.btn_select_folder.setMinimumHeight(30)
+        self.btn_select_folder.clicked.connect(self.select_folder)
+
+        folder_layout.addWidget(self.update_folder_path_edit)
+        folder_layout.addWidget(self.btn_select_folder)
+
+        # ===== Update Buttons =====
+        button_layout = QVBoxLayout()
+        button_layout.setSpacing(20)
+
+        self.btn_entry_update = QPushButton("Entry update mode")
+        self.btn_bootloader = QPushButton("Update Bootloader")
+        self.btn_kernel = QPushButton("Update Kernel")
+        self.btn_filesystem = QPushButton("Update File System")
+        self.btn_reboot = QPushButton("Reboot")
+        self.set_update_buttons_enabled(False)
+
+        buttons = [
+            self.btn_entry_update,
+            self.btn_bootloader,
+            self.btn_kernel,
+            self.btn_filesystem,
+            self.btn_reboot,
+        ]
+
+        for btn in buttons:
+            btn.setMinimumHeight(50)
+            btn.setStyleSheet("""
+                QPushButton {
+                    font-size: 16px;
+                    font-weight: bold;
+                }
+            """)
+            button_layout.addWidget(btn)
+
+        # ===== Connect Signals =====
+        self.btn_entry_update.clicked.connect(self.enter_update_mode)
+        self.btn_bootloader.clicked.connect(self.update_bootloader)
+        self.btn_kernel.clicked.connect(self.update_kernel)
+        self.btn_filesystem.clicked.connect(self.update_filesystem)
+        self.btn_reboot.clicked.connect(self.reboot_device)
+
+        # ===== Output Log =====
+        self.update_text_edit = QTextEdit()
+        self.update_text_edit.setReadOnly(True)
+        self.update_text_edit.setStyleSheet("font-size: 14px;")
+
+        # ===== Layout Combine =====
+        main_layout.addLayout(folder_layout)
+        main_layout.addSpacing(10)
+        main_layout.addLayout(button_layout)
+        main_layout.addSpacing(10)
+        main_layout.addWidget(self.update_text_edit)
+
+        self.setLayout(main_layout)
+
+    def select_folder(self):
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select Update Folder"
+        )
+        if folder:
+            self.update_folder_path_edit.setText(folder)
+            self.append_update_log(f"Selected folder: {folder}")
+    
+    def enter_update_mode(self):
+        self.append_update_log("Rebooting device to bootloader...")
+
+        self.entry_process = QProcess(self)
+        self.entry_process.readyReadStandardOutput.connect(
+            self.handle_entry_stdout
+        )
+        self.entry_process.readyReadStandardError.connect(
+            self.handle_entry_stderr
+        )
+        self.entry_process.finished.connect(
+            self.on_enter_update_finished
+        )
+        self.entry_process.start("adb", ["reboot", "bootloader"])
+
+    def on_enter_update_finished(self):
+        self.append_update_log("Waiting for fastboot device...")
+
+        # wait for device reboot
+        QTimer.singleShot(3000, self.check_fastboot)
+
+    def update_bootloader(self):
+        folder = self.update_folder_path_edit.text()
+        if not folder:
+            self.append_update_log("Please select update folder first.")
+            return
+        abl_path = os.path.join(folder, "abl.elf")
+        if not os.path.exists(abl_path):
+            self.append_update_log(f"ERROR: File not found -> {abl_path}")
+            return
+        self.append_update_log("Start Bootloader update...")
+        self.append_update_log(f"Using file: {abl_path}")
+        self.bootloader_step = 0
+        self.abl_path = abl_path
+
+        self.btn_bootloader.setEnabled(False)
+        self.btn_reboot.setEnabled(False)
+
+        self.bootloader_process = QProcess(self)
+        self.bootloader_process.readyReadStandardOutput.connect(
+            self.handle_bootloader_stdout
+        )
+        self.bootloader_process.readyReadStandardError.connect(
+            self.handle_bootloader_stderr
+        )
+        self.bootloader_process.finished.connect(
+            self.on_bootloader_step_finished
+        )
+
+        # ===== step 1 flash abl_a =====
+        self.bootloader_step = 1
+        self.bootloader_process.start(
+            "fastboot",
+            ["flash", "abl_a", self.abl_path]
+        )
+
+    def on_bootloader_step_finished(self):
+        if self.bootloader_step == 1:
+            self.append_update_log("abl_a flashed. Flashing abl_b...")
+
+            self.bootloader_step = 2
+            self.bootloader_process.start(
+                "fastboot",
+                ["flash", "abl_b", self.abl_path]
+            )
+
+        elif self.bootloader_step == 2:
+            self.append_update_log("Bootloader update success.\n")
+            self.btn_bootloader.setEnabled(True)
+            self.btn_reboot.setEnabled(True)
+            self.bootloader_step = 0
+
+    def update_kernel(self):
+        folder = self.update_folder_path_edit.text().strip()
+
+        if not folder:
+            self.append_update_log("Please select update folder.", True)
+            return
+
+        image_name = "qti-ubuntu-robotics-image-qrb5165-rb5-boot.img"
+        image_path = os.path.join(folder, image_name)
+
+        if not os.path.exists(image_path):
+            self.append_update_log(f"Kernel image not found: {image_name}", True)
+            return
+
+        self.append_update_log("Start upgrading Kernel...", True)
+        self.append_update_log(f"Using image: {image_path}", False)
+
+        self.btn_kernel.setEnabled(False)
+        self.btn_reboot.setEnabled(False)
+
+        self.kernel_process = QProcess(self)
+        self.kernel_process.readyReadStandardOutput.connect(
+            self.handle_kernel_stdout
+        )
+        self.kernel_process.readyReadStandardError.connect(
+            self.handle_kernel_stderr
+        )
+        self.kernel_process.finished.connect(
+            self.on_kernel_finished
+        )
+        # execute command
+        self.kernel_process.start(
+            "fastboot",
+            ["--slot", "all", "flash", "boot", image_path]
+        )
+
+    def on_kernel_finished(self, exitCode, exitStatus):
+        if exitCode == 0:
+            self.append_update_log("Kernel update SUCCESS.", True)
+            self.btn_reboot.setEnabled(True)
+        else:
+            self.append_update_log("Kernel update FAILED.", True)
+        self.btn_kernel.setEnabled(True)
+        self.btn_reboot.setEnabled(True)
+
+    def update_filesystem(self):
+        folder = self.update_folder_path_edit.text().strip()
+
+        if not folder:
+            self.append_update_log("Please select upgrade folder.", True)
+            return
+
+        image_name = "qti-ubuntu-robotics-image-qrb5165-rb5-sysfs.ext4"
+        image_path = os.path.join(folder, image_name)
+
+        if not os.path.exists(image_path):
+            self.append_update_log(f"File system image not found: {image_name}", True)
+            return
+
+        self.append_update_log("Start update File System...", True)
+        self.btn_filesystem.setEnabled(False)
+        self.btn_reboot.setEnabled(False)
+        self.filesystem_process = QProcess(self)
+        self.filesystem_process.readyReadStandardOutput.connect(
+            self.handle_filesystem_stdout
+        )
+        self.filesystem_process.readyReadStandardError.connect(
+            self.handle_filesystem_stderr
+        )
+        self.filesystem_process.finished.connect(
+            self.on_filesystem_finished
+        )
+        self.filesystem_process.start(
+            "fastboot",
+            ["--slot", "all", "flash", "system", image_path]
+        )
+
+    def on_filesystem_finished(self, exitCode, exitStatus):
+        if exitCode == 0:
+            self.append_update_log("File system upgrade SUCCESS.", True)
+            self.btn_reboot.setEnabled(True)
+        else:
+            self.append_update_log("File system upgrade FAILED.", True)
+
+        self.btn_filesystem.setEnabled(True)
+        self.btn_reboot.setEnabled(True)
+
+    def reboot_device(self):
+        self.append_update_log("Rebooting device...", True)
+        self.btn_reboot.setEnabled(False)
+        self.reboot_process = QProcess(self)
+        self.reboot_process.readyReadStandardOutput.connect(
+            self.handle_reboot_stdout
+        )
+        self.reboot_process.readyReadStandardError.connect(
+            self.handle_reboot_stderr
+        )
+        self.reboot_process.finished.connect(
+            self.on_reboot_finished
+        )
+        self.reboot_process.start("fastboot", ["reboot"])
+
+    def on_reboot_finished(self, exitCode, exitStatus):
+        if exitCode == 0:
+            self.append_update_log("Device reboot SUCCESS.", True)
+        else:
+            self.append_update_log("Device reboot FAILED.", True)
+        self.btn_bootloader.setEnabled(False)
+        self.btn_kernel.setEnabled(False)
+        self.btn_filesystem.setEnabled(False)
+        self.btn_reboot.setEnabled(True)
+
+    def check_fastboot(self):
+        self.fastboot_process = QProcess(self)
+        self.fastboot_process.readyReadStandardOutput.connect(
+            self.handle_fastboot_output
+        )
+        self.fastboot_process.readyReadStandardError.connect(
+            self.handle_fastboot_error
+        )
+        self.fastboot_process.start("fastboot", ["devices"])
+
+    def handle_entry_stdout(self):
+        data = self.entry_process.readAllStandardOutput()
+        text = bytes(data).decode("utf-8").strip()
+        if text:
+            self.append_update_log(text)
+
+    def handle_entry_stderr(self):
+        data = self.entry_process.readAllStandardError()
+        text = bytes(data).decode("utf-8").strip()
+        if text:
+            self.append_update_log("ERROR: " + text)
+
+    def handle_fastboot_output(self):
+        data = self.fastboot_process.readAllStandardOutput()
+        text = bytes(data).decode("utf-8").strip()
+        if text:
+            self.append_update_log("Fastboot device detected:")
+            self.append_update_log(text)
+            self.set_update_buttons_enabled(True)
+        else:
+            self.append_update_log("No fastboot device found.")
+
+    def handle_fastboot_error(self):
+        data = self.fastboot_process.readAllStandardError()
+        text = bytes(data).decode("utf-8").strip()
+        if text:
+            self.append_update_log("ERROR: " + text)
+
+    def handle_bootloader_stdout(self):
+        data = self.bootloader_process.readAllStandardOutput()
+        text = bytes(data).decode("utf-8", errors="ignore")
+        self.process_fastboot_output(text)
+
+    def handle_bootloader_stderr(self):
+        data = self.bootloader_process.readAllStandardError()
+        text = bytes(data).decode("utf-8", errors="ignore")
+        self.process_fastboot_output(text)
+
+    def process_fastboot_output(self, text):
+        if not hasattr(self, "fastboot_buffer"):
+            self.fastboot_buffer = ""
+        self.fastboot_buffer += text
+        self.fastboot_buffer = self.fastboot_buffer.replace("\r", "")
+        lines = self.fastboot_buffer.split("\n")
+        self.fastboot_buffer = lines[-1]
+        for line in lines[:-1]:
+            line = line.strip()
+            if not line:
+                continue
+            self.append_update_log(line, False)
+
+    def handle_kernel_stdout(self):
+        data = self.kernel_process.readAllStandardOutput()
+        text = bytes(data).decode("utf-8", errors="ignore")
+        self.process_kernel_output(text)
+
+    def handle_kernel_stderr(self):
+        data = self.kernel_process.readAllStandardError()
+        text = bytes(data).decode("utf-8", errors="ignore")
+        self.process_kernel_output(text)
+
+    def process_kernel_output(self, text):
+        if not hasattr(self, "kernel_buffer"):
+            self.kernel_buffer = ""
+        self.kernel_buffer += text
+        self.kernel_buffer = self.kernel_buffer.replace("\r", "")
+        lines = self.kernel_buffer.split("\n")
+        self.kernel_buffer = lines[-1]
+        for line in lines[:-1]:
+            line = line.strip()
+            if not line:
+                continue
+            self.append_update_log(line, False)
+
+    def handle_filesystem_stdout(self):
+        data = self.filesystem_process.readAllStandardOutput()
+        text = bytes(data).decode("utf-8", errors="ignore")
+        self.process_filesystem_output(text)
+
+    def handle_filesystem_stderr(self):
+        data = self.filesystem_process.readAllStandardError()
+        text = bytes(data).decode("utf-8", errors="ignore")
+        self.process_filesystem_output(text)
+
+    def process_filesystem_output(self, text):
+        if not hasattr(self, "filesystem_buffer"):
+            self.filesystem_buffer = ""
+        self.filesystem_buffer += text
+        self.filesystem_buffer = self.filesystem_buffer.replace("\r", "")
+        lines = self.filesystem_buffer.split("\n")
+        self.filesystem_buffer = lines[-1]
+        for line in lines[:-1]:
+            line = line.strip()
+            if not line:
+                continue
+            self.append_update_log(line, False)
+
+    def handle_reboot_stdout(self):
+        data = self.reboot_process.readAllStandardOutput()
+        text = bytes(data).decode("utf-8", errors="ignore")
+        self.process_reboot_output(text)
+
+    def process_reboot_output(self, text):
+        if not hasattr(self, "reboot_buffer"):
+            self.reboot_buffer = ""
+        self.reboot_buffer += text
+        self.reboot_buffer = self.reboot_buffer.replace("\r", "")
+        lines = self.reboot_buffer.split("\n")
+        self.reboot_buffer = lines[-1]
+        for line in lines[:-1]:
+            line = line.strip()
+            if not line:
+                continue
+            self.append_update_log(line, False)
+
+    def handle_reboot_stderr(self):
+        data = self.reboot_process.readAllStandardError()
+        text = bytes(data).decode("utf-8", errors="ignore")
+        self.process_reboot_output(text)
+
+    def set_update_buttons_enabled(self, enabled: bool):
+        self.btn_bootloader.setEnabled(enabled)
+        self.btn_kernel.setEnabled(enabled)
+        self.btn_filesystem.setEnabled(enabled)
+
+    def append_update_log(self, text, show_time=True):
+        if show_time:
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            final_text = f"[{timestamp}] {text}"
+        else:
+            final_text = text
+
+        self.update_text_edit.append(final_text)
+
+        # auto scroll to the bottom
+        cursor = self.update_text_edit.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self.update_text_edit.setTextCursor(cursor)
