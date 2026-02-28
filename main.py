@@ -12,6 +12,7 @@ from PySide6.QtGui import QGuiApplication
 import os
 from info import InfoTab
 from update import UpdateTab
+from test import TestTab
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -26,7 +27,7 @@ class MainWindow(QMainWindow):
         # create three pages
         self.tab_info = InfoTab()
         self.tab_upgrade = UpdateTab()
-        self.tab_test = self.create_test_tab()
+        self.tab_test = TestTab()
 
         self.tabs.addTab(self.tab_info, "Info")
         self.tabs.addTab(self.tab_upgrade, "Update")
