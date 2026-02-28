@@ -1,16 +1,23 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QTextEdit
+    QPushButton, QTextEdit,QLabel,
+
 )
 from PySide6.QtCore import QProcess
+from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Qt
+import subprocess
+import time
 
 
 class TestTab(QWidget):
     def __init__(self):
         super().__init__()
 
+        self.last_device_online = None
         self.test_buffer = ""
         self.init_ui()
+        self.start_adb_monitor()
 
     # ===============================
     # UI
@@ -18,6 +25,17 @@ class TestTab(QWidget):
     def init_ui(self):
         main_layout = QVBoxLayout()
 
+        # ===== Top status layout =====
+        status_layout = QHBoxLayout()
+        self.device_status_label = QLabel("Offline")  # default offline
+        self.device_status_label.setAlignment(Qt.AlignCenter)
+        self.device_status_label.setStyleSheet("color: red; font-weight: bold;")
+        status_layout.addWidget(QLabel("Device status:          "))
+        status_layout.addWidget(self.device_status_label)
+        status_layout.addStretch()
+        main_layout.addLayout(status_layout)
+
+        # ===== buttons layout =====
         button_layout = QVBoxLayout()
         button_layout.setSpacing(15)
 
@@ -40,6 +58,7 @@ class TestTab(QWidget):
                 }
             """)
             button_layout.addWidget(btn)
+            btn.setEnabled(False)
 
         self.test_text_edit = QTextEdit()
         self.test_text_edit.setReadOnly(True)
@@ -59,6 +78,30 @@ class TestTab(QWidget):
         self.btn_dual_mode.clicked.connect(self.run_dual_mode)
         self.btn_sdcard.clicked.connect(self.run_sdcard_test)
         self.btn_reset.clicked.connect(self.run_reset)
+
+    def start_adb_monitor(self):
+        self.adb_thread = AdbMonitorThread()
+        self.adb_thread.device_status_signal.connect(self.update_buttons)
+        self.adb_thread.start()
+
+    def update_buttons(self, online):
+        for btn in [self.btn_dual_mode, self.btn_sdcard, self.btn_reset]:
+            btn.setEnabled(online)
+        # Update text label
+        if online:
+            self.device_status_label.setText("Online")
+            self.device_status_label.setStyleSheet("color: green; font-weight: bold;")
+        else:
+            self.device_status_label.setText("Offline")
+            self.device_status_label.setStyleSheet("color: red; font-weight: bold;")
+
+        # Log only when the device **becomes online**
+        if online and (self.last_device_online is None or not self.last_device_online):
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            self.append_log(f"[{timestamp}] Device connected (Online)", True)
+
+        self.last_device_online = online
 
     def run_dual_mode(self):
         self.append_log("Setting Dual Mode ...", True)
@@ -123,7 +166,7 @@ class TestTab(QWidget):
         if exitCode == 0 and output:
             self.append_log("SDCard INSERTED ✓", True)
 
-            # 继续做读写测试
+            # continue do read/write test
             self.run_sdcard_function_test()
         else:
             self.append_log("SDCard NOT detected ✗", True)
@@ -184,8 +227,6 @@ class TestTab(QWidget):
             self.append_log("Reset FAILED (ADB error during sync).", True)
 
     def reboot_device(self):
-        self.append_log("Rebooting device...", True)
-
         self.reboot_process = QProcess(self)
 
         self.reboot_process.readyReadStandardOutput.connect(
@@ -225,7 +266,7 @@ class TestTab(QWidget):
 
     def on_reboot_finished(self, exitCode, exitStatus):
         if exitCode == 0:
-            self.append_log("Device reboot SUCCESS.", True)
+            self.append_log("Device rebooting ...", True)
         else:
             self.append_log("Device reboot FAILED.", True)
 
@@ -237,3 +278,35 @@ class TestTab(QWidget):
             self.test_text_edit.append(text)
         else:
             self.test_text_edit.append(text)
+
+class AdbMonitorThread(QThread):
+    # Signal: True = device online, False = device offline
+    device_status_signal = Signal(bool)
+
+    def __init__(self, interval=2):
+        super().__init__()
+        self.interval = interval  # check interval in seconds
+        self._running = True
+
+    def run(self):
+        while self._running:
+            try:
+                # Use adb get-state for quick device check
+                result = subprocess.run(
+                    ["adb", "get-state"],
+                    capture_output=True,
+                    text=True
+                )
+                # Determine if device is online
+                online = result.stdout.strip() == "device"
+            except Exception:
+                online = False
+
+            # Emit signal to update the GUI
+            self.device_status_signal.emit(online)
+
+            time.sleep(self.interval)
+
+    def stop(self):
+        self._running = False
+        self.wait()

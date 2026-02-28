@@ -51,16 +51,13 @@ class MainWindow(QMainWindow):
         # Defer centering until after the window is fully shown/layouted
         QTimer.singleShot(0, self.center_window)
 
-    # =========================
-    # Tab 3 : TEST
-    # =========================
-    def create_test_tab(self):
-        widget = QWidget()
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel("TEST"))
-        widget.setLayout(layout)
-        return widget
+    def closeEvent(self, event):
+        # Stop any threads in child tabs
+        if hasattr(self.tab_test, "adb_thread") and self.tab_test.adb_thread.isRunning():
+            self.tab_test.adb_thread.stop()
+            self.tab_test.adb_thread.wait()
 
+        super().closeEvent(event)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
