@@ -19,7 +19,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("Factory Test Tool")
-        self.resize(800, 800)
+        self.resize(600, 600)
 
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
