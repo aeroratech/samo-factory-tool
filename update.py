@@ -45,17 +45,14 @@ class UpdateTab(QWidget):
         button_layout.setSpacing(20)
 
         self.btn_entry_update = QPushButton("Entry update mode")
-        self.btn_bootloader = QPushButton("Update Bootloader")
-        self.btn_kernel = QPushButton("Update Kernel")
-        self.btn_filesystem = QPushButton("Update File System")
+        self.btn_update = QPushButton("Update")
         self.btn_reboot = QPushButton("Reboot")
-        self.set_update_buttons_enabled(False)
+        self.btn_update.setEnabled(False)
+        self.btn_reboot.setEnabled(False)
 
         buttons = [
             self.btn_entry_update,
-            self.btn_bootloader,
-            self.btn_kernel,
-            self.btn_filesystem,
+            self.btn_update,
             self.btn_reboot,
         ]
 
@@ -71,10 +68,9 @@ class UpdateTab(QWidget):
 
         # ===== Connect Signals =====
         self.btn_entry_update.clicked.connect(self.enter_update_mode)
-        self.btn_bootloader.clicked.connect(self.update_bootloader)
-        self.btn_kernel.clicked.connect(self.update_kernel)
-        self.btn_filesystem.clicked.connect(self.update_filesystem)
+        self.btn_update.clicked.connect(self.full_update)
         self.btn_reboot.clicked.connect(self.reboot_device)
+
 
         # ===== Output Log =====
         self.update_text_edit = QTextEdit()
@@ -134,9 +130,6 @@ class UpdateTab(QWidget):
         self.bootloader_step = 0
         self.abl_path = abl_path
 
-        self.btn_bootloader.setEnabled(False)
-        self.btn_reboot.setEnabled(False)
-
         self.bootloader_process = QProcess(self)
         self.bootloader_process.readyReadStandardOutput.connect(
             self.handle_bootloader_stdout
@@ -167,9 +160,10 @@ class UpdateTab(QWidget):
 
         elif self.bootloader_step == 2:
             self.append_update_log("Bootloader update success.\n")
-            self.btn_bootloader.setEnabled(True)
-            self.btn_reboot.setEnabled(True)
             self.bootloader_step = 0
+
+            # Always continue with kernel update as part of the update flow
+            self.update_kernel()
 
     def update_kernel(self):
         folder = self.update_folder_path_edit.text().strip()
@@ -188,7 +182,7 @@ class UpdateTab(QWidget):
         self.append_update_log("Start upgrading Kernel...", True)
         self.append_update_log(f"Using image: {image_path}", False)
 
-        self.btn_kernel.setEnabled(False)
+        self.btn_update.setEnabled(False)
         self.btn_reboot.setEnabled(False)
 
         self.kernel_process = QProcess(self)
@@ -210,17 +204,21 @@ class UpdateTab(QWidget):
     def on_kernel_finished(self, exitCode, exitStatus):
         if exitCode == 0:
             self.append_update_log("Kernel update SUCCESS.", True)
-            self.btn_reboot.setEnabled(True)
+            # Always continue with filesystem update as part of the update flow
+            self.update_filesystem()
+            return
         else:
             self.append_update_log("Kernel update FAILED.", True)
-        self.btn_kernel.setEnabled(True)
-        self.btn_reboot.setEnabled(True)
+            # stop update chain on failure
+
+        self.btn_update.setEnabled(True)
+        # Do NOT enable reboot here; only after full update is done
 
     def update_filesystem(self):
         folder = self.update_folder_path_edit.text().strip()
 
         if not folder:
-            self.append_update_log("Please select upgrade folder.", True)
+            self.append_update_log("Please select update folder.", True)
             return
 
         image_name = "qti-ubuntu-robotics-image-qrb5165-rb5-sysfs.ext4"
@@ -231,7 +229,7 @@ class UpdateTab(QWidget):
             return
 
         self.append_update_log("Start update File System...", True)
-        self.btn_filesystem.setEnabled(False)
+        self.btn_update.setEnabled(False)
         self.btn_reboot.setEnabled(False)
         self.filesystem_process = QProcess(self)
         self.filesystem_process.readyReadStandardOutput.connect(
@@ -250,13 +248,23 @@ class UpdateTab(QWidget):
 
     def on_filesystem_finished(self, exitCode, exitStatus):
         if exitCode == 0:
-            self.append_update_log("File system upgrade SUCCESS.", True)
+            self.append_update_log("File system update SUCCESS.", True)
             self.btn_reboot.setEnabled(True)
         else:
-            self.append_update_log("File system upgrade FAILED.", True)
+            self.append_update_log("File system update FAILED.", True)
 
-        self.btn_filesystem.setEnabled(True)
-        self.btn_reboot.setEnabled(True)
+        self.btn_update.setEnabled(True)
+        # Reboot is only enabled on success above
+
+    def full_update(self):
+        """
+        Run bootloader, kernel and filesystem updates in sequence.
+        Assumes device is already in fastboot mode and update folder is selected.
+        """
+        self.append_update_log("Starting FULL UPDATE (Bootloader + Kernel + File System)...", True)
+        self.btn_reboot.setEnabled(False)
+        self.btn_update.setEnabled(False)
+        self.update_bootloader()
 
     def reboot_device(self):
         self.append_update_log("Rebooting device...", True)
@@ -278,10 +286,8 @@ class UpdateTab(QWidget):
             self.append_update_log("Device reboot SUCCESS.", True)
         else:
             self.append_update_log("Device reboot FAILED.", True)
-        self.btn_bootloader.setEnabled(False)
-        self.btn_kernel.setEnabled(False)
-        self.btn_filesystem.setEnabled(False)
-        self.btn_reboot.setEnabled(True)
+        self.btn_update.setEnabled(False)
+        self.btn_reboot.setEnabled(False)
 
     def check_fastboot(self):
         self.fastboot_process = QProcess(self)
@@ -311,7 +317,8 @@ class UpdateTab(QWidget):
         if text:
             self.append_update_log("Fastboot device detected:")
             self.append_update_log(text)
-            self.set_update_buttons_enabled(True)
+            self.btn_update.setEnabled(True)
+            self.btn_reboot.setEnabled(True)
         else:
             self.append_update_log("No fastboot device found.")
 
@@ -320,6 +327,8 @@ class UpdateTab(QWidget):
         text = bytes(data).decode("utf-8").strip()
         if text:
             self.append_update_log("ERROR: " + text)
+        self.btn_update.setEnabled(False)
+        self.btn_reboot.setEnabled(False)
 
     def handle_bootloader_stdout(self):
         data = self.bootloader_process.readAllStandardOutput()
@@ -412,11 +421,6 @@ class UpdateTab(QWidget):
         data = self.reboot_process.readAllStandardError()
         text = bytes(data).decode("utf-8", errors="ignore")
         self.process_reboot_output(text)
-
-    def set_update_buttons_enabled(self, enabled: bool):
-        self.btn_bootloader.setEnabled(enabled)
-        self.btn_kernel.setEnabled(enabled)
-        self.btn_filesystem.setEnabled(enabled)
 
     def append_update_log(self, text, show_time=True):
         if show_time:
