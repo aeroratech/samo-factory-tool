@@ -3,10 +3,7 @@ from PySide6.QtWidgets import (
     QPushButton, QTextEdit,QLabel,
 
 )
-from PySide6.QtCore import QProcess
-from PySide6.QtCore import QThread, Signal
-from PySide6.QtCore import Qt
-import subprocess
+from PySide6.QtCore import QProcess, QThread, Signal, Qt
 import time
 
 
@@ -287,23 +284,27 @@ class AdbMonitorThread(QThread):
         super().__init__()
         self.interval = interval  # check interval in seconds
         self._running = True
+        self._last_online = None  # Track last state to avoid redundant signals
 
     def run(self):
         while self._running:
             try:
-                # Use adb get-state for quick device check
-                result = subprocess.run(
-                    ["adb", "get-state"],
-                    capture_output=True,
-                    text=True
-                )
-                # Determine if device is online
-                online = result.stdout.strip() == "device"
+                # Use QProcess to avoid console window on Windows
+                process = QProcess()
+                process.start("adb", ["get-state"])
+                process.waitForFinished(3000)  # 3 second timeout
+                if process.exitCode() == 0:
+                    output = bytes(process.readAllStandardOutput()).decode("utf-8", errors="ignore").strip()
+                    online = output == "device"
+                else:
+                    online = False
             except Exception:
                 online = False
 
-            # Emit signal to update the GUI
-            self.device_status_signal.emit(online)
+            # Only emit signal when state changes (or first run)
+            if self._last_online != online:
+                self.device_status_signal.emit(online)
+                self._last_online = online
 
             time.sleep(self.interval)
 
