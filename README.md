@@ -1,159 +1,113 @@
 # Factory Test Tool
 
-A Qt-based desktop GUI tool for testing and updating SAMO (qrb5165-rb5) devices. The tool communicates with devices over ADB/fastboot and provides a streamlined interface for device management and factory testing.
+Desktop GUI tool (PySide6) for SAMO (`qrb5165-rb5`) factory operations over `adb` and `fastboot`.
 
-## Features
+## Overview
 
-The tool is organized into three tabs:
+The app has 3 tabs:
 
-### Info Tab
-- Display device version information
-- Shows camera version (`/etc/aerora-version`)
-- Shows gimbal version (`/etc/gimbal-version`)
-- Real-time log output with timestamps
-
-### Update Tab
-- Bootloader update (`abl.elf` flashed to both `abl_a` and `abl_b` slots)
-- Kernel update (`qti-ubuntu-robotics-image-qrb5165-rb5-boot.img`)
-- Filesystem update (`qti-ubuntu-robotics-image-qrb5165-rb5-sysfs.ext4`)
-- Device reboot functionality
-- Automatic update sequence (bootloader → kernel → filesystem)
-- Real-time update progress logging
-
-### Test Tab
-- **Device Status Monitor**: Real-time device connection status
-- **Dual Mode Test**: Configures camera for dual mode operation by setting `CAM_DIS_MODE` to `3` in `/data/camera/cam_param.bin`
-- **SDCard Test**: Verifies SD card presence and performs write/read functionality test
-- **Reset**: Deletes camera parameter file and reboots device to restore defaults
-- All test functions automatically reboot the device upon completion
+- `Info`: Read camera/gimbal version files from target device.
+- `Update`: Flash bootloader, kernel, and filesystem images.
+- `TEST`: Run factory checks (dual mode, SD card test, reset).
 
 ## Requirements
 
-### System Requirements
-- Python 3.7 or higher
-- Linux/Windows/macOS with GUI support
+- Python `3.7+`
+- `adb` in `PATH`
+- `fastboot` in `PATH`
+- GUI-capable host (Linux/Windows/macOS)
 
-### External Dependencies
-- **ADB** - Android Debug Bridge must be installed and in your `PATH`
-- **Fastboot** - Required for device updates and bootloader operations
+Python dependencies:
 
-### Python Dependencies
-```
-PySide6>=6.5.0
-pyinstaller>=6.0
-```
-
-## Installation
-
-### 1. Clone the repository
-```bash
-cd factory_tool
-```
-
-### 2. Create and activate virtual environment (optional but recommended)
-```bash
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-### 3. Install dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Verify ADB and Fastboot
+## Quick Start
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate    # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+python main.py
+```
+
+Sanity check tools:
+
 ```bash
 adb version
 fastboot --version
 ```
 
-## Usage
+## Update Package Layout
 
-### Starting the Application
-```bash
-python main.py
-```
+When selecting an update folder in the `Update` tab, it must include:
 
-The application window will open with three tabs: Info, Update, and TEST.
+- `abl.elf`
+- `qti-ubuntu-robotics-image-qrb5165-rb5-boot.img`
+- `qti-ubuntu-robotics-image-qrb5165-rb5-sysfs.ext4`
 
-### Info Tab Usage
-1. Connect your device via USB
-2. Verify device is visible: `adb devices`
-3. Click the **Version** button to retrieve version information
-4. Output will display camera and gimbal versions with timestamps
-5. Use **Clear** to clear the log output
+## Tab Behavior
 
-### Update Tab Usage
-1. Connect device via USB
-2. Select your update folder using **Select Update Folder** button
-   - The folder must contain:
-     - `abl.elf` (bootloader)
-     - `qti-ubuntu-robotics-image-qrb5165-rb5-boot.img` (kernel)
-     - `qti-ubuntu-robotics-image-qrb5165-rb5-sysfs.ext4` (filesystem)
-3. Click **Entry update mode** to reboot device to bootloader
-4. Wait for device to be detected in fastboot mode
-5. Click **Update** to start the full update sequence:
-   - Bootloader updates (both A and B slots)
-   - Kernel update
-   - Filesystem update
-6. After successful update, click **Reboot** to restart the device
+### Info Tab
 
-### TEST Tab Usage
-1. Connect device via USB
-2. Observe device status (Online/Offline) indicator
-3. **Dual Mode Test**: Click to set camera to dual mode and reboot
-4. **SDCard Test**: Click to verify SD card is mounted and functional
-5. **Reset**: Click to reset camera parameters to defaults and reboot
+- `Version` runs:
+  - `adb shell cat /etc/aerora-version`
+  - `adb shell cat /etc/gimbal-version`
+- `Clear` clears the log.
 
-## Building as Executable
+### Update Tab
 
-To build the tool as a standalone executable:
+1. Click `Select Update Folder`.
+2. Click `Entry update mode` (runs `adb reboot bootloader`).
+3. Tool waits and checks `fastboot devices`.
+4. Click `Update` to run full chain:
+   - `fastboot flash abl_a abl.elf`
+   - `fastboot flash abl_b abl.elf`
+   - `fastboot --slot all flash boot ...boot.img`
+   - `fastboot --slot all flash system ...sysfs.ext4`
+5. Click `Reboot` (runs `fastboot reboot`) after successful flash.
+
+Notes:
+
+- `Update` is disabled until a fastboot device is detected.
+- `Reboot` is enabled after full update success (and can also be enabled after fastboot detection).
+
+### TEST Tab
+
+- Device status (`Online`/`Offline`) is monitored in background via `adb get-state`.
+- `Dual Mode Test` updates `CAM_DIS_MODE` to `"3"` in `/data/camera/cam_param.bin`, then reboots the device.
+- `SDCard Test` checks mount state (`/mnt/sdcard`) and runs write/read/remove test.
+- `Reset` removes `/data/camera/cam_param.bin`, syncs, then reboots.
+
+## Build Executable
 
 ```bash
 pyinstaller --onefile --windowed main.py
 ```
 
-The executable will be created in the `dist/` directory.
+Output is generated under `dist/`.
 
-## Project Structure
+## Project Files
 
-```
-factory_tool/
-├── main.py          # Main application window and tab management
-├── info.py          # Info tab - device version information
-├── update.py        # Update tab - bootloader/kernel/filesystem updates
-├── test.py          # Test tab - factory tests and device monitoring
-├── requirements.txt # Python dependencies
-└── README.md        # This file
-```
+- `main.py`: Main window and tab container.
+- `info.py`: Device version read UI/logic.
+- `update.py`: Full update workflow and fastboot logging.
+- `test.py`: Factory test actions and ADB online monitor thread.
 
 ## Troubleshooting
 
-### Device not detected
-- Verify USB cable is properly connected
-- Run `adb devices` to check if device is visible
-- Try disconnecting and reconnecting the device
-- Ensure ADB drivers are installed (Windows)
-
-### Update fails
-- Ensure all required files are present in the selected folder
-- Verify device is in fastboot mode (`fastboot devices`)
-- Check that files are not corrupted
-- Ensure sufficient disk space on device
-
-### ADB permission errors (Linux)
-```bash
-# Add udev rules for ADB
-sudo nano /etc/udev/rules.d/51-android.rules
-# Add: SUBSYSTEM=="usb", ATTR{idVendor}=="05c6", MODE="0666"
-sudo service udev restart
-```
-
-### Tests not working
-- Ensure device is online (status indicator shows "Online" in green)
-- Verify device is not in bootloader/fastboot mode (run `adb get-state`)
-- Check test logs for specific error messages
+- Device not visible in app:
+  - Run `adb devices` and accept device authorization prompt.
+  - Confirm USB cable/port and power.
+- `Update` button stays disabled:
+  - Confirm device is in bootloader mode and visible in `fastboot devices`.
+- Flash failures:
+  - Verify exact filenames in selected update folder.
+  - Re-enter bootloader and retry.
+- Linux USB permission issues:
+  - Configure proper udev rules for your device vendor and reload udev.
 
 ## License
 
-Internal / factory use only. Do not redistribute without permission.
+Internal factory use only.
