@@ -1,0 +1,58 @@
+name: Build Windows Package
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-windows-package:
+    name: Build Windows Package
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Set package version
+        run: |
+          $tag = git describe --tags --abbrev=0 2>$null
+          if (-not $tag) {
+            $tag = "v0.0"
+            $count = git rev-list --count HEAD
+          } else {
+            $count = git rev-list --count "$tag..HEAD"
+          }
+          $version = "$tag.$count"
+          $version = $version -replace '[^0-9A-Za-z._-]', '-'
+          $appName = "samo-factory-tool-$version"
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "APP_NAME=$appName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build executable
+        run: pyinstaller --onefile --windowed --name "$env:APP_NAME" main.py
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ env.APP_NAME }}-windows-package
+          path: dist/${{ env.APP_NAME }}.exe
+          if-no-files-found: error
