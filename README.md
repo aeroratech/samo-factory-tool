@@ -59,7 +59,7 @@ When selecting an update folder in the `Update` tab, it must include:
 ### Update Tab
 
 1. Click `Select Update Folder`.
-2. Click `Entry update mode` (runs `adb reboot bootloader`).
+2. Click `Entry update mode` (runs `adb root`, then `adb reboot bootloader`).
 3. Tool waits and checks `fastboot devices`.
 4. Click `Update` to run full chain:
    - `fastboot flash abl_a abl.elf`

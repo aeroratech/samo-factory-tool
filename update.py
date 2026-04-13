@@ -96,7 +96,8 @@ class UpdateTab(QWidget):
             self.append_update_log(f"Selected folder: {folder}")
     
     def enter_update_mode(self):
-        self.append_update_log("Rebooting device to bootloader...")
+        self.append_update_log("Restarting adbd as root before entering bootloader...")
+        self.entry_step = 1
 
         self.entry_process = QProcess(self)
         self.entry_process.readyReadStandardOutput.connect(
@@ -108,9 +109,19 @@ class UpdateTab(QWidget):
         self.entry_process.finished.connect(
             self.on_enter_update_finished
         )
-        self.entry_process.start("adb", ["reboot", "bootloader"])
+        self.entry_process.start("adb", ["root"])
 
     def on_enter_update_finished(self):
+        if self.entry_step == 1:
+            self.append_update_log("Rebooting device to bootloader...")
+            self.entry_step = 2
+            QTimer.singleShot(
+                3000,
+                lambda: self.entry_process.start("adb", ["reboot", "bootloader"])
+            )
+            return
+
+        self.entry_step = 0
         self.append_update_log("Waiting for fastboot device...")
 
         # wait for device reboot
