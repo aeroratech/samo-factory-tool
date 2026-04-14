@@ -1,6 +1,5 @@
 import os
 from datetime import datetime
-from re import T
 
 from PySide6.QtWidgets import (
     QWidget,
@@ -20,6 +19,9 @@ class UpdateTab(QWidget):
         super().__init__()
 
         self.process = None
+        self.entry_step = 0
+        self.fastboot_check_attempts = 0
+        self.fastboot_check_after_reboot = False
         self.init_ui()
 
     # ================= UI =================
@@ -96,6 +98,14 @@ class UpdateTab(QWidget):
             self.append_update_log(f"Selected folder: {folder}")
     
     def enter_update_mode(self):
+        self.append_update_log("Checking for device in fastboot mode...")
+        self.btn_update.setEnabled(False)
+        self.btn_reboot.setEnabled(False)
+        self.entry_step = 0
+        self.fastboot_check_attempts = 0
+        self.check_fastboot(after_reboot=False)
+
+    def start_adb_entry_flow(self):
         self.append_update_log("Restarting adbd as root before entering bootloader...")
         self.entry_step = 1
         self.start_entry_process(["root"])
@@ -119,7 +129,7 @@ class UpdateTab(QWidget):
     def start_reboot_to_bootloader(self):
         self.start_entry_process(["reboot", "bootloader"])
 
-    def on_enter_update_finished(self):
+    def on_enter_update_finished(self, exitCode=0, exitStatus=None):
         if self.entry_step == 1:
             self.append_update_log("Waiting for device after adb root...")
             self.entry_step = 2
@@ -136,7 +146,8 @@ class UpdateTab(QWidget):
         self.append_update_log("Waiting for fastboot device...")
 
         # wait for device reboot
-        QTimer.singleShot(3000, self.check_fastboot)
+        self.fastboot_check_attempts = 0
+        QTimer.singleShot(3000, lambda: self.check_fastboot(after_reboot=True))
 
     def update_bootloader(self):
         folder = self.update_folder_path_edit.text()
@@ -311,15 +322,54 @@ class UpdateTab(QWidget):
         self.btn_update.setEnabled(False)
         self.btn_reboot.setEnabled(False)
 
-    def check_fastboot(self):
+    def check_fastboot(self, after_reboot=False):
+        self.fastboot_check_after_reboot = after_reboot
+        self.fastboot_check_attempts += 1
         self.fastboot_process = QProcess(self)
-        self.fastboot_process.readyReadStandardOutput.connect(
-            self.handle_fastboot_output
-        )
-        self.fastboot_process.readyReadStandardError.connect(
-            self.handle_fastboot_error
-        )
+        self.fastboot_process.finished.connect(self.on_fastboot_check_finished)
         self.fastboot_process.start("fastboot", ["devices"])
+
+    def on_fastboot_check_finished(self, exitCode=0, exitStatus=None):
+        output = bytes(
+            self.fastboot_process.readAllStandardOutput()
+        ).decode("utf-8", errors="ignore").strip()
+        error = bytes(
+            self.fastboot_process.readAllStandardError()
+        ).decode("utf-8", errors="ignore").strip()
+
+        devices = self.parse_fastboot_devices(output)
+        if devices:
+            self.append_update_log("Fastboot device detected:")
+            self.append_update_log("\n".join(devices), False)
+            self.btn_update.setEnabled(True)
+            self.btn_reboot.setEnabled(True)
+            return
+
+        self.btn_update.setEnabled(False)
+        self.btn_reboot.setEnabled(False)
+
+        if error:
+            self.append_update_log("ERROR: " + error)
+
+        if not self.fastboot_check_after_reboot:
+            self.append_update_log("No fastboot device found. Trying ADB reboot to bootloader...")
+            self.start_adb_entry_flow()
+            return
+
+        max_attempts = 10
+        if self.fastboot_check_attempts < max_attempts:
+            self.append_update_log("No fastboot device found. Waiting...")
+            QTimer.singleShot(1000, lambda: self.check_fastboot(after_reboot=True))
+            return
+
+        self.append_update_log("No fastboot device found.")
+
+    def parse_fastboot_devices(self, output):
+        return [
+            line.strip()
+            for line in output.splitlines()
+            if line.strip()
+        ]
 
     def handle_entry_stdout(self):
         data = self.entry_process.readAllStandardOutput()
@@ -332,25 +382,6 @@ class UpdateTab(QWidget):
         text = bytes(data).decode("utf-8").strip()
         if text:
             self.append_update_log("ERROR: " + text)
-
-    def handle_fastboot_output(self):
-        data = self.fastboot_process.readAllStandardOutput()
-        text = bytes(data).decode("utf-8").strip()
-        if text:
-            self.append_update_log("Fastboot device detected:")
-            self.append_update_log(text)
-            self.btn_update.setEnabled(True)
-            self.btn_reboot.setEnabled(True)
-        else:
-            self.append_update_log("No fastboot device found.")
-
-    def handle_fastboot_error(self):
-        data = self.fastboot_process.readAllStandardError()
-        text = bytes(data).decode("utf-8").strip()
-        if text:
-            self.append_update_log("ERROR: " + text)
-        self.btn_update.setEnabled(False)
-        self.btn_reboot.setEnabled(False)
 
     def handle_bootloader_stdout(self):
         data = self.bootloader_process.readAllStandardOutput()
