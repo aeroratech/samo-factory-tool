@@ -51,9 +51,14 @@ When selecting an update folder in the `Update` tab, it must include:
 
 ### Info Tab
 
-- `Version` runs:
+- `Info` runs:
   - `adb shell cat /etc/aerora-version`
   - `adb shell cat /etc/gimbal-version`
+- reads the device `eth0` MAC address and calculates the hardware ID.
+- If the hardware ID exists in `device_info.csv`, the matching device SN is loaded from CSV.
+- If the hardware ID is new, `Device SN` accepts the manually entered serial number.
+- `Store` writes `device_sn,hardware_id` to `device_info.csv`, updating the SN when the hardware ID already exists. In a packaged executable, the CSV is stored beside the executable file.
+- `Open` opens `device_info.csv` if it exists, otherwise opens the CSV storage folder.
 - `Clear` clears the log.
 
 ### Update Tab
