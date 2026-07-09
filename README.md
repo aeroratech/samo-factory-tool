@@ -4,11 +4,13 @@ Desktop GUI tool (PySide6) for SAMO (`qrb5165-rb5`) factory operations over `adb
 
 ## Overview
 
-The app has 3 tabs:
+The app has 3 visible tabs:
 
 - `Info`: Read camera/gimbal version files from target device.
 - `Update`: Flash bootloader, kernel, and filesystem images.
-- `TEST`: Run factory checks (dual mode, SD card test, reset).
+- `config`: Change device configuration, including the background image.
+
+The `TEST` tab still exists in the application but is hidden from the tab bar.
 
 ## Requirements
 
@@ -73,6 +75,22 @@ Notes:
 - `Update` is disabled until a fastboot device is detected.
 - `Reboot` is enabled after full update success (and can also be enabled after fastboot detection).
 
+### config Tab
+
+- On startup, the tab reads `/etc/systemd/system/mav_client.service` over `adb` and selects the matching camera type.
+- Camera type and background image are unified in the camera type setting.
+- `ACSL SAMO` sets `CAM_BRAND=ACSL`, `CAM_MODEL=SAMO`, and `background-image=/usr/share/weston/background_logo_acsl.png`.
+- `AERORA D64TR` sets `CAM_BRAND=AERORA`, `CAM_MODEL=D64TR`, and `background-image=/usr/share/weston/background_logo_aeroratech.png`.
+- `Apply Camera Type` updates `/etc/systemd/system/mav_client.service`, updates `/etc/xdg/weston/weston.ini`, runs `adb shell sync`, and prompts for reboot.
+- `USB` connection uses `ExecStart=/usr/bin/mav_client -l -u udp://127.0.0.1:14570`.
+- `Ethernet` uses `udp://192.168.144.100:14550 --connection_type ethernet`.
+- `WLAN` uses `udp://192.168.251.2:14550 --connection_type wlan`.
+- `With Autopilot` appends `--autopilot` to the connection command.
+- `WLAN` shows an aerial-required warning.
+- `Apply Connection Type` backs up `mav_client.service`, updates `ExecStart`, runs `systemctl daemon-reload`, restarts `mav_client.service`, and runs `adb shell sync`.
+- `Refresh` rereads current camera type and connection type config from the device.
+- `ADB Reboot` runs `adb reboot`.
+
 ### TEST Tab
 
 - Device status (`Online`/`Offline`) is monitored in background via `adb get-state`.
@@ -93,6 +111,7 @@ Output is generated under `dist/`.
 - `main.py`: Main window and tab container.
 - `info.py`: Device version read UI/logic.
 - `update.py`: Full update workflow and fastboot logging.
+- `config.py`: Device configuration UI/logic.
 - `test.py`: Factory test actions and ADB online monitor thread.
 
 ## Troubleshooting
