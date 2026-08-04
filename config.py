@@ -311,11 +311,11 @@ class ConfigTab(QWidget):
             )
 
         if has_autopilot:
-            self.autopilot_radio_buttons["Autopilot mode"].setChecked(True)
-            self.append_config_log("Current autopilot mode: Autopilot mode", show_time=False)
-        else:
             self.autopilot_radio_buttons["Standalone mode"].setChecked(True)
-            self.append_config_log("Current autopilot mode: Standalone mode", show_time=False)
+            self.append_config_log("Current mode: Standalone mode", show_time=False)
+        else:
+            self.autopilot_radio_buttons["Autopilot mode"].setChecked(True)
+            self.append_config_log("Current mode: Autopilot mode", show_time=False)
 
 
     def handle_connection_type_init_stderr(self):
@@ -403,7 +403,7 @@ class ConfigTab(QWidget):
         )
 
     def connection_type_exec_start(self, connection_type):
-        autopilot_arg = " --autopilot" if self.is_autopilot_enabled() else ""
+        autopilot_arg = " --autopilot" if self.is_standalone_mode() else ""
 
         if connection_type == "Ethernet":
             return (
@@ -489,8 +489,8 @@ class ConfigTab(QWidget):
 
         return "USB"
 
-    def is_autopilot_enabled(self):
-        return self.autopilot_radio_buttons["Autopilot mode"].isChecked()
+    def is_standalone_mode(self):
+        return self.autopilot_radio_buttons["Standalone mode"].isChecked()
 
     def run_next_command(self, success_message):
         if self.current_index >= len(self.command_queue):
