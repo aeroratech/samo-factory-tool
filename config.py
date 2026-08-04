@@ -46,8 +46,8 @@ class ConfigTab(QWidget):
             "WLAN",
         ]
         self.autopilot_options = [
-            "Without Autopilot",
-            "With Autopilot",
+            "Standalone mode",
+            "Autopilot mode",
         ]
 
         self.init_ui()
@@ -117,7 +117,7 @@ class ConfigTab(QWidget):
             self.autopilot_radio_buttons[option_name] = radio_button
             autopilot_layout.addWidget(radio_button)
 
-        self.autopilot_radio_buttons["Without Autopilot"].setChecked(True)
+        self.autopilot_radio_buttons["Standalone mode"].setChecked(True)
 
         self.btn_apply_connection_type = QPushButton("Apply Connection Type")
         self.btn_apply_connection_type.setMinimumHeight(45)
@@ -311,11 +311,11 @@ class ConfigTab(QWidget):
             )
 
         if has_autopilot:
-            self.autopilot_radio_buttons["With Autopilot"].setChecked(True)
-            self.append_config_log("Current autopilot mode: With Autopilot", show_time=False)
+            self.autopilot_radio_buttons["Autopilot mode"].setChecked(True)
+            self.append_config_log("Current autopilot mode: Autopilot mode", show_time=False)
         else:
-            self.autopilot_radio_buttons["Without Autopilot"].setChecked(True)
-            self.append_config_log("Current autopilot mode: Without Autopilot", show_time=False)
+            self.autopilot_radio_buttons["Standalone mode"].setChecked(True)
+            self.append_config_log("Current autopilot mode: Standalone mode", show_time=False)
 
 
     def handle_connection_type_init_stderr(self):
@@ -490,7 +490,7 @@ class ConfigTab(QWidget):
         return "USB"
 
     def is_autopilot_enabled(self):
-        return self.autopilot_radio_buttons["With Autopilot"].isChecked()
+        return self.autopilot_radio_buttons["Autopilot mode"].isChecked()
 
     def run_next_command(self, success_message):
         if self.current_index >= len(self.command_queue):

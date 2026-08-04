@@ -85,7 +85,8 @@ Notes:
 - `USB` connection uses `ExecStart=/usr/bin/mav_client -l -u udp://127.0.0.1:14570`.
 - `Ethernet` uses `udp://192.168.144.100:14550 --connection_type ethernet`.
 - `WLAN` uses `udp://192.168.251.2:14550 --connection_type wlan`.
-- `With Autopilot` appends `--autopilot` to the connection command.
+- `Standalone mode` uses the connection command without `--autopilot`.
+- `Autopilot mode` appends `--autopilot` to the connection command.
 - `WLAN` shows an aerial-required warning.
 - `Apply Connection Type` backs up `mav_client.service`, updates `ExecStart`, runs `systemctl daemon-reload`, restarts `mav_client.service`, and runs `adb shell sync`.
 - `Refresh` rereads current camera type and connection type config from the device.
